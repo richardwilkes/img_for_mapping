@@ -17,9 +17,11 @@ import (
 
 	"github.com/richardwilkes/img_for_mapping/internal/config"
 	_ "github.com/richardwilkes/img_for_mapping/internal/webp"
+	"github.com/richardwilkes/toolbox/atexit"
 	"github.com/richardwilkes/toolbox/cmdline"
 	"github.com/richardwilkes/toolbox/errs"
 	"github.com/richardwilkes/toolbox/log/jot"
+	"github.com/richardwilkes/toolbox/taskqueue"
 	"github.com/richardwilkes/toolbox/txt"
 	"github.com/richardwilkes/toolbox/xio"
 	_ "golang.org/x/image/bmp"
@@ -37,7 +39,7 @@ func main() {
 	cmdline.AppName = "Image Processing for Mapping"
 	cmdline.CopyrightYears = "2021-2022"
 	cmdline.CopyrightHolder = "Richard A. Wilkes"
-	cmdline.AppVersion = "1.0.1"
+	cmdline.AppVersion = "1.1"
 
 	cfg := config.Default()
 	cl := cmdline.New(true)
@@ -49,12 +51,24 @@ func main() {
 	}
 	cfg.Validate()
 
+	queue := taskqueue.New(taskqueue.RecoveryHandler(func(err error) { jot.Error(err) }))
 	for _, one := range collectFilesToProcess(args) {
-		remove, err := processImage(one, cfg)
-		jot.FatalIfErr(err)
+		queue.Submit(createTask(cfg, one))
+	}
+	queue.Shutdown()
+	atexit.Exit(0)
+}
+
+func createTask(cfg *config.Config, imgPath string) func() {
+	return func() {
+		remove, err := processImage(cfg, imgPath)
+		if err != nil {
+			jot.Error(errs.NewWithCause("unable to process "+imgPath, err))
+			return
+		}
 		if remove {
-			if err = os.Remove(one); err != nil {
-				jot.Fatal(1, errs.NewWithCause("unable to remove "+one, err))
+			if err = os.Remove(imgPath); err != nil {
+				jot.Error(errs.NewWithCause("unable to remove "+imgPath, err))
 			}
 		}
 	}
@@ -99,7 +113,7 @@ func collectFilesToProcess(args []string) []string {
 	return sorted
 }
 
-func processImage(imgPath string, cfg *config.Config) (bool, error) {
+func processImage(cfg *config.Config, imgPath string) (bool, error) {
 	img, err := loadImage(imgPath)
 	if err != nil {
 		return false, err
@@ -244,5 +258,5 @@ func writeChunkAsPNG(filePath string, img image.Image, cfg *config.Config) (bool
 	defer func() {
 		jot.FatalIfErr(os.Remove(filePath))
 	}()
-	return processImage(filePath, cfg)
+	return processImage(cfg, filePath)
 }
