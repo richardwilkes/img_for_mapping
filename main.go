@@ -86,13 +86,13 @@ func collectFilesToProcess(args []string) []string {
 				return err
 			}
 			hidden := strings.HasPrefix(info.Name(), ".")
-			if hidden {
-				return nil
-			}
 			if info.IsDir() {
 				if hidden {
 					return filepath.SkipDir
 				}
+				return nil
+			}
+			if hidden {
 				return nil
 			}
 			if extToProcess[strings.ToLower(filepath.Ext(path))] {
