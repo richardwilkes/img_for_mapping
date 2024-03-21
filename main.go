@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 	"github.com/richardwilkes/toolbox/atexit"
 	"github.com/richardwilkes/toolbox/cmdline"
 	"github.com/richardwilkes/toolbox/errs"
-	"github.com/richardwilkes/toolbox/log/jot"
+	"github.com/richardwilkes/toolbox/fatal"
 	"github.com/richardwilkes/toolbox/taskqueue"
 	"github.com/richardwilkes/toolbox/txt"
 	"github.com/richardwilkes/toolbox/xio"
@@ -37,9 +38,9 @@ var (
 
 func main() {
 	cmdline.AppName = "Image Processing for Mapping"
-	cmdline.CopyrightYears = "2021-2022"
+	cmdline.CopyrightStartYear = "2021"
 	cmdline.CopyrightHolder = "Richard A. Wilkes"
-	cmdline.AppVersion = "1.1"
+	cmdline.AppVersion = "1.2"
 
 	cfg := config.Default()
 	cl := cmdline.New(true)
@@ -47,11 +48,12 @@ func main() {
 	args := cl.Parse(os.Args[1:])
 
 	if _, err := exec.LookPath(cwebp); err != nil {
-		jot.Fatal(1, cwebp+" is not installed")
+		slog.Error(cwebp + " is not installed")
+		atexit.Exit(1)
 	}
 	cfg.Validate()
 
-	queue := taskqueue.New(taskqueue.RecoveryHandler(func(err error) { jot.Error(err) }))
+	queue := taskqueue.New(taskqueue.RecoveryHandler(func(err error) { slog.Error(err.Error()) }))
 	for _, one := range collectFilesToProcess(args) {
 		queue.Submit(createTask(cfg, one))
 	}
@@ -63,12 +65,12 @@ func createTask(cfg *config.Config, imgPath string) func() {
 	return func() {
 		remove, err := processImage(cfg, imgPath)
 		if err != nil {
-			jot.Error(errs.NewWithCause("unable to process "+imgPath, err))
+			slog.Error(errs.NewWithCause("unable to process "+imgPath, err).Error())
 			return
 		}
 		if remove {
 			if err = os.Remove(imgPath); err != nil {
-				jot.Error(errs.NewWithCause("unable to remove "+imgPath, err))
+				slog.Error(errs.NewWithCause("unable to remove "+imgPath, err).Error())
 			}
 		}
 	}
@@ -81,7 +83,7 @@ func collectFilesToProcess(args []string) []string {
 		extToProcess[one] = true
 	}
 	for _, one := range args {
-		jot.FatalIfErr(filepath.Walk(one, func(path string, info fs.FileInfo, err error) error {
+		fatal.IfErr(filepath.Walk(one, func(path string, info fs.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -223,8 +225,8 @@ func processImage(cfg *config.Config, imgPath string) (bool, error) {
 			fmt.Println(str)
 		}
 		if !needRemove {
-			jot.FatalIfErr(os.Remove(imgPath))
-			jot.FatalIfErr(os.Rename(newPath, newPath[:len(newPath)-6]+".webp"))
+			fatal.IfErr(os.Remove(imgPath))
+			fatal.IfErr(os.Rename(newPath, newPath[:len(newPath)-6]+".webp"))
 		}
 		return needRemove, nil
 	}
@@ -256,7 +258,7 @@ func writeChunkAsPNG(filePath string, img image.Image, cfg *config.Config) (bool
 		return false, errs.NewWithCause("unable to encode "+filePath, err)
 	}
 	defer func() {
-		jot.FatalIfErr(os.Remove(filePath))
+		fatal.IfErr(os.Remove(filePath))
 	}()
 	return processImage(cfg, filePath)
 }
