@@ -1,6 +1,6 @@
 module github.com/richardwilkes/img_for_mapping
 
-go 1.22.1
+go 1.23.3
 
 require (
 	github.com/richardwilkes/toolbox v1.106.0
