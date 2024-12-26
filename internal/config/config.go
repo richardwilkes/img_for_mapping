@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	ForceSize           string
 	InputPixelsPerInch  int
 	OutputPixelsPerInch int
 	Quality             int
@@ -28,7 +29,10 @@ func (c *Config) AddCmdLineOptions(cl *cmdline.CmdLine) {
 	cl.NewGeneralOption(&c.OutputPixelsPerInch).SetSingle('r').SetName("resize-ppi").
 		SetUsage("The output pixels-per-inch of the image files. If unset, defaults to the input pixels-per-inch")
 	cl.NewGeneralOption(&c.Quality).SetSingle('q').SetName("quality").SetUsage("The desired quality")
-	cl.NewGeneralOption(&c.KeepGoing).SetSingle('k').SetName("keep-going").SetUsage("Keep going, skipping over image files that are invalid due to ppi or size mis-matches")
+	cl.NewGeneralOption(&c.KeepGoing).SetSingle('k').SetName("keep-going").
+		SetUsage("Keep going, skipping over image files that are invalid due to ppi or size mis-matches")
+	cl.NewGeneralOption(&c.ForceSize).SetSingle('f').SetName("force-size").SetArg("dimensions").
+		SetUsage(`Force the output size to be a specific grid size of the desired output ppi, e.g. "4x5". When this option is set, the input ppi is ignored`)
 }
 
 func (c *Config) Validate() {

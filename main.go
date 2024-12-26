@@ -40,7 +40,7 @@ func main() {
 	cmdline.AppName = "Image Processing for Mapping"
 	cmdline.CopyrightStartYear = "2021"
 	cmdline.CopyrightHolder = "Richard A. Wilkes"
-	cmdline.AppVersion = "1.2"
+	cmdline.AppVersion = "1.3"
 
 	cfg := config.Default()
 	cl := cmdline.New(true)
@@ -123,84 +123,98 @@ func processImage(cfg *config.Config, imgPath string) (bool, error) {
 	b := img.Bounds()
 	w := b.Dx()
 	h := b.Dy()
-	if w%cfg.InputPixelsPerInch != 0 || h%cfg.InputPixelsPerInch != 0 {
-		if cfg.KeepGoing {
-			return false, nil
+	blockWidth := 0
+	blockHeight := 0
+	if cfg.ForceSize != "" {
+		if result := sizeRegex.FindStringSubmatchIndex(cfg.ForceSize); len(result) == 6 {
+			if blockWidth, err = strconv.Atoi(cfg.ForceSize[result[2]:result[3]]); err != nil {
+				blockWidth = 0
+			}
+			if blockHeight, err = strconv.Atoi(cfg.ForceSize[result[4]:result[5]]); err != nil {
+				blockHeight = 0
+			}
 		}
-		return false, errs.Newf("image does not have a ppi of %d: %s", cfg.InputPixelsPerInch, imgPath)
 	}
 	newPath := imgPath[:len(imgPath)-len(filepath.Ext(imgPath))]
-	if result := sizeRegex.FindStringSubmatchIndex(newPath); len(result) == 6 {
-		var inlineW, inlineH int
-		if inlineW, err = strconv.Atoi(newPath[result[2]:result[3]]); err != nil {
-			inlineW = 0
-		}
-		if inlineH, err = strconv.Atoi(newPath[result[4]:result[5]]); err != nil {
-			inlineH = 0
-		}
-		if inlineW > 0 && inlineH > 0 && (w != inlineW*cfg.InputPixelsPerInch || h != inlineH*cfg.InputPixelsPerInch) {
+	if blockWidth <= 0 || blockHeight <= 0 {
+		if w%cfg.InputPixelsPerInch != 0 || h%cfg.InputPixelsPerInch != 0 {
 			if cfg.KeepGoing {
 				return false, nil
 			}
-			return false, errs.New("image has wrong dimensions: " + imgPath)
+			return false, errs.Newf("image does not have a ppi of %d: %s", cfg.InputPixelsPerInch, imgPath)
 		}
-		newPath = txt.CollapseSpaces(newPath[:result[0]] + newPath[result[1]:])
-	}
-	if result := ppiRegex.FindStringSubmatchIndex(newPath); len(result) == 4 {
-		var ppi int
-		if ppi, err = strconv.Atoi(newPath[result[2]:result[3]]); err != nil {
-			ppi = 0
-		}
-		if ppi != 0 && ppi != cfg.InputPixelsPerInch {
-			if cfg.KeepGoing {
-				return false, nil
+		if result := sizeRegex.FindStringSubmatchIndex(newPath); len(result) == 6 {
+			var inlineW, inlineH int
+			if inlineW, err = strconv.Atoi(newPath[result[2]:result[3]]); err != nil {
+				inlineW = 0
 			}
-			return false, errs.New("image has wrong pixels-per-inch in name: " + imgPath)
+			if inlineH, err = strconv.Atoi(newPath[result[4]:result[5]]); err != nil {
+				inlineH = 0
+			}
+			if inlineW > 0 && inlineH > 0 && (w != inlineW*cfg.InputPixelsPerInch || h != inlineH*cfg.InputPixelsPerInch) {
+				if cfg.KeepGoing {
+					return false, nil
+				}
+				return false, errs.New("image has wrong dimensions: " + imgPath)
+			}
+			newPath = txt.CollapseSpaces(newPath[:result[0]] + newPath[result[1]:])
 		}
-		newPath = txt.CollapseSpaces(newPath[:result[0]] + newPath[result[1]:])
+		if result := ppiRegex.FindStringSubmatchIndex(newPath); len(result) == 4 {
+			var ppi int
+			if ppi, err = strconv.Atoi(newPath[result[2]:result[3]]); err != nil {
+				ppi = 0
+			}
+			if ppi != 0 && ppi != cfg.InputPixelsPerInch {
+				if cfg.KeepGoing {
+					return false, nil
+				}
+				return false, errs.New("image has wrong pixels-per-inch in name: " + imgPath)
+			}
+			newPath = txt.CollapseSpaces(newPath[:result[0]] + newPath[result[1]:])
+		}
+		if w > 16383 {
+			rgba, ok := img.(*image.RGBA)
+			if !ok {
+				b = image.Rect(0, 0, w, h)
+				rgba = image.NewRGBA(b)
+				draw.Draw(rgba, b, img, b.Min, draw.Src)
+			}
+			half := image.Rect(0, 0, w/2, h)
+			dst := image.NewRGBA(half)
+			draw.Draw(dst, half, rgba, b.Min, draw.Src)
+			if _, err = writeChunkAsPNG(newPath+" - Left.png", dst, cfg); err != nil {
+				return false, err
+			}
+			draw.Draw(dst, half, rgba, image.Pt(w/2, 0), draw.Src)
+			if _, err = writeChunkAsPNG(newPath+" - Right.png", dst, cfg); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if h > 16383 {
+			rgba, ok := img.(*image.RGBA)
+			if !ok {
+				b = image.Rect(0, 0, w, h)
+				rgba = image.NewRGBA(b)
+				draw.Draw(rgba, b, img, b.Min, draw.Src)
+			}
+			half := image.Rect(0, 0, w, h/2)
+			dst := image.NewRGBA(half)
+			draw.Draw(dst, half, rgba, b.Min, draw.Src)
+			if _, err = writeChunkAsPNG(newPath+" - Top.png", dst, cfg); err != nil {
+				return false, err
+			}
+			draw.Draw(dst, half, rgba, image.Pt(0, h/2), draw.Src)
+			if _, err = writeChunkAsPNG(newPath+" - Bottom.png", dst, cfg); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		blockWidth = w / cfg.InputPixelsPerInch
+		blockHeight = h / cfg.InputPixelsPerInch
 	}
-	if w > 16383 {
-		rgba, ok := img.(*image.RGBA)
-		if !ok {
-			b = image.Rect(0, 0, w, h)
-			rgba = image.NewRGBA(b)
-			draw.Draw(rgba, b, img, b.Min, draw.Src)
-		}
-		half := image.Rect(0, 0, w/2, h)
-		dst := image.NewRGBA(half)
-		draw.Draw(dst, half, rgba, b.Min, draw.Src)
-		if _, err = writeChunkAsPNG(newPath+" - Left.png", dst, cfg); err != nil {
-			return false, err
-		}
-		draw.Draw(dst, half, rgba, image.Pt(w/2, 0), draw.Src)
-		if _, err = writeChunkAsPNG(newPath+" - Right.png", dst, cfg); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	if h > 16383 {
-		rgba, ok := img.(*image.RGBA)
-		if !ok {
-			b = image.Rect(0, 0, w, h)
-			rgba = image.NewRGBA(b)
-			draw.Draw(rgba, b, img, b.Min, draw.Src)
-		}
-		half := image.Rect(0, 0, w, h/2)
-		dst := image.NewRGBA(half)
-		draw.Draw(dst, half, rgba, b.Min, draw.Src)
-		if _, err = writeChunkAsPNG(newPath+" - Top.png", dst, cfg); err != nil {
-			return false, err
-		}
-		draw.Draw(dst, half, rgba, image.Pt(0, h/2), draw.Src)
-		if _, err = writeChunkAsPNG(newPath+" - Bottom.png", dst, cfg); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	blockWidth := w / cfg.InputPixelsPerInch
-	blockHeight := h / cfg.InputPixelsPerInch
 	newPath = fmt.Sprintf("%s %dx%d @%d ppi.webp", newPath, blockWidth, blockHeight, cfg.OutputPixelsPerInch)
-	if imgPath != newPath || cfg.InputPixelsPerInch != cfg.OutputPixelsPerInch {
+	if imgPath != newPath || cfg.InputPixelsPerInch != cfg.OutputPixelsPerInch || cfg.ForceSize != "" {
 		fmt.Println(filepath.Base(imgPath), "->", filepath.Base(newPath))
 		needRemove := true
 		if imgPath == newPath {
@@ -209,7 +223,7 @@ func processImage(cfg *config.Config, imgPath string) (bool, error) {
 		}
 		args := make([]string, 0, 16)
 		args = append(args, "-preset", "photo", "-q", strconv.Itoa(cfg.Quality), "-m", "6", "-mt", "-af", "-quiet")
-		if cfg.InputPixelsPerInch != cfg.OutputPixelsPerInch {
+		if cfg.InputPixelsPerInch != cfg.OutputPixelsPerInch || cfg.ForceSize != "" {
 			args = append(args, "-resize", strconv.Itoa(blockWidth*cfg.OutputPixelsPerInch),
 				strconv.Itoa(blockHeight*cfg.OutputPixelsPerInch))
 		}
